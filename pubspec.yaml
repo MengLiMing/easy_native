@@ -1,8 +1,8 @@
 name: easy_native
-description: "A new Flutter plugin project."
+description: "A powerful Flutter plugin for seamless native routing management and bidirectional communication between Flutter and iOS/Android."
 version: 0.0.1
-homepage:
-
+homepage: https://github.com/MengLiMing/easy_native
+repository: https://github.com/MengLiMing/easy_native
 environment:
   sdk: ^3.0.0
   flutter: ">=3.3.0"
