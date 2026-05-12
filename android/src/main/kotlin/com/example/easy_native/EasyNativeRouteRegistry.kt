@@ -6,6 +6,7 @@ import android.content.Intent
 object EasyNativeRouteRegistry {
     const val EXTRA_ROUTE_NAME = "easy_native.route_name"
     const val EXTRA_PRESENTED = "easy_native.presented"
+    const val EXTRA_REQUEST_ID = "easy_native.request_id"
 
     private val nativeRoutes: MutableMap<String, (Context, Any?) -> Intent?> = mutableMapOf()
 

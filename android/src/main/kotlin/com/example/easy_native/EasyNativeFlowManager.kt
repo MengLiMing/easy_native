@@ -15,6 +15,7 @@ enum class NativeFlowState {
 // Coordinates a native flow. It is not a stack manager; Android owns the real Activity stack.
 object EasyNativeFlowManager {
     private val trackedActivities: MutableList<Activity> = mutableListOf()
+    private val completedRequestIds: MutableSet<String> = mutableSetOf()
     private var state: NativeFlowState = NativeFlowState.IDLE
 
     fun onActivityCreated(activity: Activity) {
@@ -28,6 +29,16 @@ object EasyNativeFlowManager {
 
     fun onActivityDestroyed(activity: Activity) {
         trackedActivities.remove(activity)
+        if (!activity.isChangingConfigurations) {
+            val requestId = requestIdOf(activity)
+            if (requestId != null) {
+                if (completedRequestIds.contains(requestId)) {
+                    completedRequestIds.remove(requestId)
+                } else {
+                    EasyNativePlugin.completeRoute(requestId, null, "nativeDestroy")
+                }
+            }
+        }
         if (trackedActivities.isEmpty()) {
             state = NativeFlowState.IDLE
         }
@@ -35,10 +46,11 @@ object EasyNativeFlowManager {
 
     fun hasActiveNativeFlow(): Boolean = state != NativeFlowState.IDLE || trackedActivities.isNotEmpty()
 
-    fun push(context: Context, routeName: String, arguments: Any?): Map<String, Any?> {
+    fun push(context: Context, routeName: String, arguments: Any?, requestId: String?): Map<String, Any?> {
         checkCanRoute("nativePush")?.let { return it }
         val intent = EasyNativeRouteRegistry.getNativeIntent(context, routeName, arguments)
             ?: return failure("Native route is not registered: $routeName", "nativePush")
+        attachRequestId(intent, requestId)
         val hadActiveFlow = hasActiveNativeFlow()
         val startResult = start(context, intent, "nativePush")
         if (!startResult.success) return startResult.result
@@ -48,11 +60,12 @@ object EasyNativeFlowManager {
         return success(if (hadActiveFlow) "nativePush" else "openNativeFlow")
     }
 
-    fun present(context: Context, routeName: String, arguments: Any?): Map<String, Any?> {
+    fun present(context: Context, routeName: String, arguments: Any?, requestId: String?): Map<String, Any?> {
         checkCanRoute("nativePresent")?.let { return it }
         val intent = EasyNativeRouteRegistry.getNativeIntent(context, routeName, arguments)
             ?: return failure("Native route is not registered: $routeName", "nativePresent")
         intent.putExtra(EasyNativeRouteRegistry.EXTRA_PRESENTED, true)
+        attachRequestId(intent, requestId)
         val startResult = start(context, intent, "nativePresent")
         if (!startResult.success) return startResult.result
         applyPresentAnimation(context)
@@ -61,21 +74,29 @@ object EasyNativeFlowManager {
         return success("nativePresent")
     }
 
-    fun replace(context: Context, routeName: String, arguments: Any?): Map<String, Any?> {
+    fun replace(
+        context: Context,
+        routeName: String,
+        arguments: Any?,
+        result: Any?,
+        requestId: String?,
+    ): Map<String, Any?> {
         checkCanRoute("nativeReplace")?.let { return it }
         val intent = EasyNativeRouteRegistry.getNativeIntent(context, routeName, arguments)
             ?: return failure("Native route is not registered: $routeName", "nativeReplace")
+        attachRequestId(intent, requestId)
         val top = trackedActivities.lastOrNull()
         val startResult = start(context, intent, "nativeReplace")
         if (!startResult.success) return startResult.result
         applyPushAnimation(context)
         state = NativeFlowState.ACTIVE
+        top?.let { completeRouteIfNeeded(it, result, "nativeReplace") }
         top?.finish()
         EasyNativeLogger.log(EasyNativeLogLevel.DEBUG, "native replace $routeName")
         return success("nativeReplace")
     }
 
-    fun pop(): Map<String, Any?> {
+    fun pop(result: Any?): Map<String, Any?> {
         checkCanRoute("nativePop")?.let { return it }
         val top = trackedActivities.lastOrNull()
             ?: return failure("No active native flow", "nativePop")
@@ -84,6 +105,7 @@ object EasyNativeFlowManager {
             state = NativeFlowState.CLOSING
         }
 
+        completeRouteIfNeeded(top, result, "nativePop")
         top.finish()
         applyCloseAnimation(top)
         EasyNativeLogger.log(EasyNativeLogLevel.DEBUG, "native pop")
@@ -98,6 +120,7 @@ object EasyNativeFlowManager {
         }
         val toFinish = trackedActivities.drop(index + 1)
         toFinish.reversed().forEach {
+            completeRouteIfNeeded(it, null, "nativePopUntil")
             it.finish()
             applyCloseAnimation(it)
         }
@@ -110,6 +133,7 @@ object EasyNativeFlowManager {
         routeName: String,
         arguments: Any?,
         untilRoute: String?,
+        requestId: String?,
     ): Map<String, Any?> {
         checkCanRoute("nativePushAndRemoveUntil")?.let { return it }
         val index = untilRoute?.let { target ->
@@ -118,11 +142,13 @@ object EasyNativeFlowManager {
         val toFinish = if (index >= 0) trackedActivities.drop(index + 1) else trackedActivities.toList()
         val intent = EasyNativeRouteRegistry.getNativeIntent(context, routeName, arguments)
             ?: return failure("Native route is not registered: $routeName", "nativePushAndRemoveUntil")
+        attachRequestId(intent, requestId)
         val startResult = start(context, intent, "nativePushAndRemoveUntil")
         if (!startResult.success) return startResult.result
         applyPushAnimation(context)
         state = NativeFlowState.ACTIVE
         toFinish.reversed().forEach {
+            completeRouteIfNeeded(it, null, "nativePushAndRemoveUntil")
             it.finish()
             applyCloseAnimation(it)
         }
@@ -130,7 +156,7 @@ object EasyNativeFlowManager {
         return success("nativePushAndRemoveUntil")
     }
 
-    fun closeAll(): Map<String, Any?> {
+    fun closeAll(result: Any?): Map<String, Any?> {
         if (Looper.myLooper() != Looper.getMainLooper()) {
             return failure("Must be called from main thread", "closeNativeFlow")
         }
@@ -142,9 +168,19 @@ object EasyNativeFlowManager {
             return success("nativeFlowAlreadyClosing")
         }
         state = NativeFlowState.CLOSING
-        trackedActivities.toList().reversed().forEach {
-            it.finish()
-            applyCloseAnimation(it)
+        var deliveredResult = false
+        trackedActivities.toList().reversed().forEach { activity ->
+            val requestId = requestIdOf(activity)
+            completeRouteIfNeeded(
+                activity,
+                if (!deliveredResult && requestId != null) result else null,
+                "closeNativeFlow",
+            )
+            if (requestId != null) {
+                deliveredResult = true
+            }
+            activity.finish()
+            applyCloseAnimation(activity)
         }
         EasyNativeLogger.log(EasyNativeLogLevel.DEBUG, "close native flow")
         return success("closeNativeFlow")
@@ -206,6 +242,26 @@ object EasyNativeFlowManager {
 
     private fun routeNameOf(activity: Activity): String? {
         return activity.intent.getStringExtra(EasyNativeRouteRegistry.EXTRA_ROUTE_NAME)
+    }
+
+    private fun requestIdOf(activity: Activity): String? {
+        return activity.intent.getStringExtra(EasyNativeRouteRegistry.EXTRA_REQUEST_ID)
+    }
+
+    private fun attachRequestId(intent: Intent, requestId: String?) {
+        if (!requestId.isNullOrBlank()) {
+            intent.putExtra(EasyNativeRouteRegistry.EXTRA_REQUEST_ID, requestId)
+        }
+    }
+
+    private fun completeRouteIfNeeded(activity: Activity, result: Any?, action: String) {
+        val requestId = requestIdOf(activity) ?: return
+        completeRoute(requestId, result, action)
+    }
+
+    private fun completeRoute(requestId: String, result: Any?, action: String) {
+        if (!completedRequestIds.add(requestId)) return
+        EasyNativePlugin.completeRoute(requestId, result, action)
     }
 
     private fun success(action: String, data: Map<String, Any?> = emptyMap()): Map<String, Any?> {

@@ -35,18 +35,25 @@ public final class EasyNative {
         return EasyNativeFlowManager.shared.push(
             routeName: routeName,
             arguments: arguments,
-            from: rootNavigatorProvider?()
+            from: rootNavigatorProvider?(),
+            requestId: nil
         )
     }
 
     public func replace(_ routeName: String, arguments: Any? = nil) -> [String: Any] {
         if EasyNativeFlowManager.shared.hasActiveNativeFlow {
-            return EasyNativeFlowManager.shared.replace(routeName: routeName, arguments: arguments)
+            return EasyNativeFlowManager.shared.replace(
+                routeName: routeName,
+                arguments: arguments,
+                result: nil,
+                requestId: nil
+            )
         }
         return EasyNativeFlowManager.shared.push(
             routeName: routeName,
             arguments: arguments,
-            from: rootNavigatorProvider?()
+            from: rootNavigatorProvider?(),
+            requestId: nil
         )
     }
 
@@ -54,7 +61,8 @@ public final class EasyNative {
         return EasyNativeFlowManager.shared.present(
             routeName: routeName,
             arguments: arguments,
-            from: rootNavigatorProvider?()
+            from: rootNavigatorProvider?(),
+            requestId: nil
         )
     }
 
@@ -119,6 +127,19 @@ public final class EasyNativePlugin: NSObject, FlutterPlugin {
         )
     }
 
+    public static func completeRoute(
+        requestId: String,
+        result: Any? = nil,
+        action: String = "nativeRouteComplete"
+    ) {
+        shared?.routerChannel?.invokeMethod("completeRoute", arguments: [
+            "requestId": requestId,
+            "result": result ?? NSNull(),
+            "success": true,
+            "action": action,
+        ])
+    }
+
     public func registerNativeMethod(
         _ method: String,
         handler: @escaping (Any?, @escaping FlutterResult) -> Void
@@ -159,12 +180,7 @@ public final class EasyNativePlugin: NSObject, FlutterPlugin {
             let args = call.arguments as? [String: Any] ?? [:]
             result(EasyNativeFlowManager.shared.popUntil(routeName: args["routeName"] as? String ?? ""))
         case "pushAndRemoveUntil":
-            let args = call.arguments as? [String: Any] ?? [:]
-            result(EasyNativeFlowManager.shared.pushAndRemoveUntil(
-                routeName: args["routeName"] as? String ?? "",
-                arguments: args["arguments"],
-                untilRoute: args["untilRoute"] as? String
-            ))
+            result(route(arguments: call.arguments, action: .pushAndRemoveUntil))
         case "closeAll":
             let args = call.arguments as? [String: Any] ?? [:]
             result(EasyNativeFlowManager.shared.closeAll(result: args["result"]))
@@ -191,6 +207,7 @@ public final class EasyNativePlugin: NSObject, FlutterPlugin {
         case push
         case replace
         case present
+        case pushAndRemoveUntil
     }
 
     private func route(arguments: Any?, action: NativeRouteAction) -> [String: Any] {
@@ -201,25 +218,45 @@ public final class EasyNativePlugin: NSObject, FlutterPlugin {
             return EasyNativeFlowManager.shared.push(
                 routeName: routeName,
                 arguments: args["arguments"],
-                from: EasyNative.shared.rootNavigatorProvider?()
+                from: EasyNative.shared.rootNavigatorProvider?(),
+                requestId: args["requestId"] as? String
             )
         case .replace:
             if EasyNativeFlowManager.shared.hasActiveNativeFlow {
                 return EasyNativeFlowManager.shared.replace(
                     routeName: routeName,
-                    arguments: args["arguments"]
+                    arguments: args["arguments"],
+                    result: args["result"],
+                    requestId: args["requestId"] as? String
                 )
             }
             return EasyNativeFlowManager.shared.push(
                 routeName: routeName,
                 arguments: args["arguments"],
-                from: EasyNative.shared.rootNavigatorProvider?()
+                from: EasyNative.shared.rootNavigatorProvider?(),
+                requestId: args["requestId"] as? String
             )
         case .present:
             return EasyNativeFlowManager.shared.present(
                 routeName: routeName,
                 arguments: args["arguments"],
-                from: EasyNative.shared.rootNavigatorProvider?()
+                from: EasyNative.shared.rootNavigatorProvider?(),
+                requestId: args["requestId"] as? String
+            )
+        case .pushAndRemoveUntil:
+            if EasyNativeFlowManager.shared.hasActiveNativeFlow {
+                return EasyNativeFlowManager.shared.pushAndRemoveUntil(
+                    routeName: routeName,
+                    arguments: args["arguments"],
+                    untilRoute: args["untilRoute"] as? String,
+                    requestId: args["requestId"] as? String
+                )
+            }
+            return EasyNativeFlowManager.shared.push(
+                routeName: routeName,
+                arguments: args["arguments"],
+                from: EasyNative.shared.rootNavigatorProvider?(),
+                requestId: args["requestId"] as? String
             )
         }
     }

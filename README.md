@@ -1,14 +1,29 @@
 # EasyNative
 
-`easy_native` 是一个轻量级的 Flutter 混合路由插件。它专为“以 Flutter 为主，原生页面为辅”的项目设计。
+`easy_native` 是一个面向 Flutter 混编项目的轻量级统一路由插件，适用于 **Flutter 为主、原生页面为辅** 的项目。
 
-它的核心理念非常简单且务实：**进入原生页面后，后续的路由堆栈交由原生端自行管理。本插件不试图维护像 FlutterBoost 极其复杂的双端混合栈状态映射。**
+核心原则：
 
-关于核心设计思路和接入指南，请参阅 [docs/design.md](docs/design.md)。
+> Flutter 负责 Flutter 栈内的页面流转。  
+> 当 Flutter 跳转到 Native 后，会进入一个 Native Flow。  
+> Native Flow 内的后续 `push / pop / replace / popUntil / pushAndRemoveUntil` 都交由原生栈自行管理。  
+> iOS 由 `UINavigationController` 管理 Native Flow，Android 由系统 `Activity` 栈管理 Native Flow。  
+> EasyNative 只负责 Flutter 与 Native 边界处的路由协调，不维护 Flutter / Native 混合虚拟栈。
 
-## 1. Flutter 端接入
+---
 
-在你的 Flutter 主入口进行初始化：
+## 特性
+
+- 一套 API 同时跳转 Flutter 页面和 Native 页面
+- Flutter 跳转到 Native 后，后续 Native Flow 由原生栈接管
+- API 语义对齐 Flutter `Navigator`
+- `push / present / replace / pushAndRemoveUntil` 会在页面关闭后返回结果
+- 支持 Native `popUntil`
+- 支持跨端 Method 调用和 Event 事件通信
+- 支持自定义日志接入
+- 不做 FlutterBoost 式复杂混合栈同步
+
+## Flutter 接入
 
 ```dart
 import 'package:easy_native/easy_native.dart';
@@ -17,17 +32,12 @@ void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
   EasyNative.init(
-    modalRouteBuilder: (settings) {
-      return CupertinoPageRoute(
-        settings: settings,
-        fullscreenDialog: true,
-        builder: (_) => buildPage(settings.name, settings.arguments),
-      );
-    },
-  );
+    // 使用 Navigator 1.0 时可传入 modalRouteBuilder
+    // modalRouteBuilder: (settings) => CupertinoPageRoute(...),
 
-  EasyNativeEventBus.initialize();
-  EasyNativeMessenger.initialize();
+    // 使用 go_router / auto_route / 自研路由时可传入 flutterRouter
+    // flutterRouter: MyFlutterRouter(),
+  );
 
   runApp(MaterialApp(
     navigatorKey: EasyNative.key,
@@ -36,137 +46,391 @@ void main() {
 }
 ```
 
-## 2. 原生端接入配置
+`EasyNative.init()` 会自动初始化：
 
-要让 `EasyNative` 能够顺利接管并执行原生路由流，你需要在 iOS 和 Android 的工程入口处进行极简的初始化配置。
+```dart
+EasyNativeEventBus.initialize();
+EasyNativeMessenger.initialize();
+```
 
-### iOS 接入
+业务侧通常不需要手动调用。
 
-在 iOS 中，Flutter 默认挂载在一个普通的 `FlutterViewController` 上。由于我们需要原生的堆栈能力，你必须手动将其包装进一个 `UINavigationController` 中，并提供给 `EasyNative`。
+---
 
-修改 `ios/Runner/AppDelegate.swift`：
+## iOS 接入
+
+iOS 侧需要提供一个宿主 `UINavigationController`。
 
 ```swift
 import UIKit
 import Flutter
-import easy_native // 1. 引入插件
+import easy_native
 
 @UIApplicationMain
 @objc class AppDelegate: FlutterAppDelegate {
-  private weak var hostNavigationController: UINavigationController?
+    private weak var hostNavigationController: UINavigationController?
 
-  override func application(
-    _ application: UIApplication,
-    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
-  ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-    let launchResult = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    override func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        GeneratedPluginRegistrant.register(with: self)
 
-    // 2. 将 FlutterViewController 包装进 UINavigationController 中
-    if hostNavigationController == nil,
-       let rootViewController = window?.rootViewController {
-      let navigationController = UINavigationController(rootViewController: rootViewController)
-      navigationController.isNavigationBarHidden = true
-      hostNavigationController = navigationController
-      window?.rootViewController = navigationController
-      window?.makeKeyAndVisible()
+        let launchResult = super.application(
+            application,
+            didFinishLaunchingWithOptions: launchOptions
+        )
+
+        if hostNavigationController == nil,
+           let rootViewController = window?.rootViewController {
+            let navigationController = UINavigationController(
+                rootViewController: rootViewController
+            )
+            navigationController.isNavigationBarHidden = true
+            hostNavigationController = navigationController
+            window?.rootViewController = navigationController
+            window?.makeKeyAndVisible()
+        }
+
+        EasyNative.shared.setup {
+            self.hostNavigationController
+        }
+
+        EasyNative.shared.registerNativeRoute("/native/detail") { args in
+            NativeDetailViewController(arguments: args)
+        }
+
+        return launchResult
     }
-
-    // 3. 将 NavigationController 提供给 EasyNative
-    EasyNative.shared.setup {
-      self.hostNavigationController
-    }
-
-    // 4. 在此处注册你的原生路由...
-    // EasyNative.shared.registerNativeRoute("/native/demo") { args in ... }
-
-    return launchResult
-  }
 }
 ```
 
-### Android 接入
+---
 
-在 Android 端，由于 `FlutterActivity` 已经提供了一个完整的 `Activity` 容器环境，你只需要在入口处初始化并传入 `Context` 即可。
-
-修改 `android/app/src/main/kotlin/.../MainActivity.kt`：
+## Android 接入
 
 ```kotlin
-import android.os.Bundle
 import android.content.Intent
+import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
-import com.example.easy_native.EasyNative // 1. 引入插件
+import com.example.easy_native.EasyNative
 
 class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 2. 初始化 EasyNative
         EasyNative.setup(applicationContext)
 
-        // 3. 在此处注册你的原生路由 Intent 映射...
-        // EasyNative.registerNativeRoute("/native/demo") { context, args ->
-        //     Intent(context, MyNativeActivity::class.java)
-        // }
+        EasyNative.registerNativeRoute("/native/detail") { context, args ->
+            Intent(context, NativeDetailActivity::class.java)
+        }
     }
 }
 ```
 
-## 3. 发起跨端路由
+> `com.example.easy_native` 请替换为插件实际包名。
 
-无论是跳转纯 Flutter 页面还是原生页面，现在你都可以通过一套统一的 API 闭着眼睛调用：
+---
+
+## 基础路由
+
+### push
 
 ```dart
-final result = await EasyNative.push('/native/detail', arguments: {
-  'id': 1,
-});
+final result = await EasyNative.push<String>(
+  '/native/detail',
+  arguments: {'id': 1},
+);
 
-result.fold(
-  (success) => debugPrint('路由成功: ${success.action}'),
-  (failure) => debugPrint('路由失败: ${failure.message}'),
+print(result);
+```
+
+### replace
+
+```dart
+final result = await EasyNative.replace<String>(
+  '/native/detail',
+  arguments: {'id': 1},
 );
 ```
 
-## 核心设计与混合路由语义
+### present
 
-本插件不仅对基础的路由操作进行了双端拉平，还针对混合栈的特殊场景进行了语义上的纠正与增强：
+```dart
+final result = await EasyNative.present<String>(
+  '/native/modal',
+  arguments: {'from': 'flutter'},
+);
+```
 
-1. **务实的混合栈模型**：
-   - 当 `Flutter` 页面打开原生页面时，原生页面会覆盖在 `Flutter` 容器之上，开启原生路由流 (Native Flow)。
-   - 原生路由流支持完整的 `push`、`present`、`replace`、`popUntil` 和 `pushAndRemoveUntil` 操作，全部交由底层的原生容器 (iOS `UINavigationController` / Android `Activity` 栈) 原生执行。
+### pushAndRemoveUntil
 
-2. **跨端 `replace` 语义抹平**：
-   - **Flutter 替换原生**：当原生流处于活跃状态时，如果你调用 `EasyNative.replace('flutter_route')`，插件会自动**关闭当前活动的原生流**，并在底层的 Flutter 栈上执行 `push` 操作。这保证了跨端替换时，新的 Flutter 页面能够正确叠加在旧的 Flutter 栈上，确保返回键状态和视觉语义前后一致。
-   - **原生替换原生 / Flutter 替换 Flutter**：完全遵循各端自身的 `replace`（替换当前顶层页面）逻辑。
+```dart
+final result = await EasyNative.pushAndRemoveUntil<String>(
+  '/native/detail',
+  arguments: {'id': 1},
+  untilRoute: '/',
+);
+```
 
-3. **双端生命周期自适应**：
-   - **Android**：深度接入 `Activity` 的生命周期，支持物理返回键退出，精确追踪活跃的 Native Activity 栈。
-   - **iOS**：深度适配 `UINavigationController`，完美支持原生左滑返回 (Swipe Back)。当用户通过手势或代码关闭最后一个原生页面时，自动感知并同步销毁跨端状态，防止状态残留。
+### pop
 
-## 核心 API
+```dart
+await EasyNative.pop({'success': true});
+```
 
-- `EasyNative.push`：压栈新页面（自动识别是 Flutter 还是 Native 路由）
-- `EasyNative.replace`：替换当前顶层页面
-- `EasyNative.present`：以模态 (Modal) 形式弹出页面
-- `EasyNative.pushAndRemoveUntil`：压栈新页面并清空之前的指定历史栈
-- `EasyNative.pop`：退栈
-- `EasyNative.popUntil`：一直退栈直到指定页面
-- `EasyNative.closeAll`：强制关闭当前所有活跃的原生页面
-- `EasyNative.canPop`：判断当前混合栈是否可以后退
-- `EasyNative.isNativeRoute`：判断目标路由是否已注册为原生路由
-- `EasyNative.hasActiveNativeFlow`：判断当前是否有原生页面盖在 Flutter 之上
+### popUntil
 
-### 跨端通信与日志
+```dart
+await EasyNative.popUntil('/native/detail');
+```
 
-除了核心的路由功能，插件还提供了轻量级的通信能力：
-- **`EasyNativeMessenger`**：用于单次的跨端方法调用（封装 MethodCall）。
-- **`EasyNativeEventBus`**：用于简单的 `type + data` 形式的事件流派发，适合处理跨界面的通知和数据同步。
-- **`EasyNativeLogger`**：通过设置 `EasyNativeLogger.provider`，宿主 App 可以将内部路由日志重定向到自己的日志库中。
+### closeAll
 
-## 容错与超时策略
+```dart
+await EasyNative.closeAll();
+```
 
-`easy_native` **不**对路由操作施加任何默认的超时（Timeout）。
+---
 
-路由方法代表着跨端的硬性协调，原生侧有责任必须回复所有的 MethodChannel 调用。如果原生侧没有回复，这被视为接入端的集成 Bug，应在原生代码中彻底修复。
+## Native 页面返回结果
 
-插件底层仅捕获并转换异常为安全的 `ResultDart` 失败类型，绝不擅自自动重试或进行静默兜底，从而保证跨端状态机的一致性和确定性。
+### Flutter
+
+```dart
+await EasyNative.pop({'success': true});
+```
+
+### iOS
+
+```swift
+EasyNative.shared.pop(result: ["success": true])
+```
+
+### Android
+
+```kotlin
+EasyNative.pop(mapOf("success" to true))
+```
+
+---
+
+## 混合路由语义
+
+### Flutter -> Native
+
+Flutter 页面打开 Native 页面时，Native 页面覆盖在 Flutter 容器之上，开启 Native Flow。
+
+```text
+Flutter /
+Flutter /list
+  -> EasyNative.push('/native/detail')
+  -> Native /native/detail
+```
+
+### Native -> Flutter
+
+当 Native Flow 活跃时跳转 Flutter 页面，EasyNative 会先关闭当前 Native Flow，再执行 Flutter 路由。
+
+### Flutter replace Native
+
+```text
+Flutter /
+Flutter /list
+  -> EasyNative.replace('/native/detail')
+  -> Native 打开成功后，Flutter /list 被移除
+  -> Native 关闭后回到 Flutter /
+```
+
+如果希望保留当前 Flutter 页面，请使用 `push`。
+
+### Native popUntil
+
+```text
+Native A
+Native B
+Native C
+  -> EasyNative.popUntil('/native/a')
+  -> 关闭 B / C
+  -> 停留在 A
+```
+
+---
+
+## Native Flow Manager
+
+`EasyNativeFlowManager` 不是栈管理器。
+
+真实栈由平台自己管理：
+
+| 平台    | 真实栈                 |
+| ------- | ---------------------- |
+| Flutter | Navigator              |
+| iOS     | UINavigationController |
+| Android | Activity 栈            |
+
+EasyNative 只负责：
+
+- 判断 Native Flow 是否活跃
+- 转发跨端路由请求
+- 记录页面 route tag
+- 在页面关闭时完成 Dart Future
+- 支持 `popUntil`
+
+EasyNative 不维护 Flutter / Native 混合虚拟栈，也不暴露 native stack depth。
+
+---
+
+## Route Tag
+
+每个通过 EasyNative 创建的 Native 页面都会自动携带 route tag：
+
+| 平台    | tag                                                      |
+| ------- | -------------------------------------------------------- |
+| iOS     | `UIViewController.easyNativeRouteName`                   |
+| Android | `Intent` 中的 `EasyNativeRouteRegistry.EXTRA_ROUTE_NAME` |
+
+`popUntil` 依赖 route tag 查找目标页面。
+
+如果 Native 内部使用系统原生跳转，也可以手动设置 route tag。
+
+### iOS
+
+```swift
+let vc = NativeDetailViewController()
+vc.easyNativeRouteName = "/native/detail"
+navigationController?.pushViewController(vc, animated: true)
+```
+
+### Android
+
+```kotlin
+val intent = Intent(this, NativeDetailActivity::class.java)
+intent.putExtra(EasyNativeRouteRegistry.EXTRA_ROUTE_NAME, "/native/detail")
+startActivity(intent)
+```
+
+---
+
+## Native 内部普通跳转
+
+Native Flow 内部允许使用系统导航：
+
+```swift
+navigationController?.pushViewController(viewController, animated: true)
+```
+
+```kotlin
+startActivity(Intent(this, DetailActivity::class.java))
+```
+
+但需要注意：
+
+- 普通系统跳转不会自动参与 EasyNative 的 route lifecycle；
+- 需要被 `popUntil` 找到时，需要手动设置 route tag；
+- 需要统一返回值、日志、注册校验时，建议使用 EasyNative 原生 API。
+
+---
+
+## 异常策略
+
+Public API 使用 Flutter 风格：
+
+```dart
+try {
+  final result = await EasyNative.push('/native/detail');
+} on EasyNativeRouteFailure catch (e) {
+  print(e.message);
+}
+```
+
+失败时抛出 `EasyNativeRouteFailure`。
+
+---
+
+## 跨端通信
+
+### EasyNativeMessenger
+
+Flutter 注册方法供 Native 调用：
+
+```dart
+EasyNativeMessenger.registerFlutterMethod('getUserInfo', (data) async {
+  return {'name': 'Flutter User'};
+});
+```
+
+Flutter 调用 Native 方法：
+
+```dart
+final result = await EasyNativeMessenger.invokeNative<Map>(
+  'getDeviceInfo',
+  data: {'from': 'flutter'},
+);
+```
+
+### EasyNativeEventBus
+
+Flutter 监听 Native 事件：
+
+```dart
+final subscription = EasyNativeEventBus.nativeEvents.listen((event) {
+  print(event.type);
+  print(event.data);
+});
+```
+
+Flutter 发送事件给 Native：
+
+```dart
+await EasyNativeEventBus.emitToNative(
+  'refreshDevice',
+  data: {'id': 1},
+);
+```
+
+---
+
+## 日志
+
+```dart
+EasyNative.init(
+  logProvider: (
+    level,
+    message, {
+    error,
+    stackTrace,
+  }) {
+    print('[EasyNative][$level] $message');
+  },
+);
+```
+
+关闭日志：
+
+```dart
+EasyNativeLogger.enabled = false;
+```
+
+---
+
+## API 概览
+
+| API                                | 说明                                      |
+| ---------------------------------- | ----------------------------------------- |
+| `EasyNative.push<T>`               | 打开页面，页面关闭后返回结果              |
+| `EasyNative.replace<T>`            | 替换页面，页面关闭后返回结果              |
+| `EasyNative.present<T>`            | 以 modal 语义打开页面，页面关闭后返回结果 |
+| `EasyNative.pushAndRemoveUntil<T>` | 打开页面并清理历史栈，页面关闭后返回结果  |
+| `EasyNative.pop`                   | 关闭当前页面并传递 result                 |
+| `EasyNative.popUntil`              | 回退到指定 route                          |
+| `EasyNative.closeAll`              | 关闭当前完整 Native Flow                  |
+| `EasyNative.canPop`                | 判断当前是否可以返回                      |
+| `EasyNative.isNativeRoute`         | 判断 route 是否为 Native route            |
+| `EasyNative.hasActiveNativeFlow`   | 判断当前是否存在 Native Flow              |
+
+---
+
+## License
+
+MIT

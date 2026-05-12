@@ -76,8 +76,43 @@ class NativeDemoActivity : Activity() {
         content.addButton("pop") {
             EasyNative.pop()
         }
+        content.addButton("pop with result") {
+            EasyNative.pop("Android result from $routeName")
+        }
+        content.addButton("pop result int") {
+            EasyNative.pop(7)
+        }
+        content.addButton("pop result bool") {
+            EasyNative.pop(true)
+        }
+        content.addButton("pop result list") {
+            EasyNative.pop(listOf("android", routeName, 1, true))
+        }
+        content.addButton("pop result map") {
+            EasyNative.pop(
+                mapOf(
+                    "platform" to "android",
+                    "route" to routeName,
+                    "nested" to mapOf("ok" to true),
+                    "items" to listOf(1, 2, 3),
+                ),
+            )
+        }
         content.addButton("close all native") {
             EasyNative.closeAll()
+        }
+        content.addButton("close all native with result") {
+            EasyNative.closeAll("Android closeAll result from $routeName")
+        }
+        content.addButton("close all native with map result") {
+            EasyNative.closeAll(
+                mapOf(
+                    "platform" to "android",
+                    "route" to routeName,
+                    "action" to "closeAll",
+                    "items" to listOf("a", 1, true),
+                ),
+            )
         }
 
         setContentView(ScrollView(this).apply {

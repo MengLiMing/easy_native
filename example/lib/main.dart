@@ -7,8 +7,6 @@ import 'package:flutter/material.dart';
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   EasyNative.init(modalRouteBuilder: _modalRouteBuilder);
-  EasyNativeEventBus.initialize();
-  EasyNativeMessenger.initialize();
   runApp(const MyApp());
 }
 
@@ -44,7 +42,7 @@ Widget _buildFlutterPage(
 
 Future<void> _discardRun(
   String label,
-  Future<EasyNativeRouteResult> Function() action,
+  Future<dynamic> Function() action,
 ) async {
   await action();
 }
@@ -103,14 +101,14 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _run(
     String label,
-    Future<EasyNativeRouteResult> Function() action,
+    Future<dynamic> Function() action,
   ) async {
-    final result = await action();
-    result.fold(
-      (success) => _log('$label -> success ${success.action ?? ''}'),
-      (failure) =>
-          _log('$label -> failure ${failure.action ?? ''} ${failure.message}'),
-    );
+    try {
+      final result = await action();
+      _log('$label -> success (result: $result)');
+    } catch (e) {
+      _log('$label -> failure ($e)');
+    }
   }
 
   @override
@@ -140,9 +138,8 @@ class HomePage extends StatelessWidget {
   final List<String> logs;
   final Future<void> Function(
     String label,
-    Future<EasyNativeRouteResult> Function() action,
-  )
-  onRun;
+    Future<dynamic> Function() action,
+  ) onRun;
   final void Function(String message) onLog;
 
   @override
@@ -172,6 +169,16 @@ class HomePage extends StatelessWidget {
             ),
           ),
           _Button(
+            label: 'push Native /native/a and await any result',
+            onPressed: () => onRun(
+              'push native await any result',
+              () => EasyNative.push<Object?>(
+                '/native/a',
+                arguments: {'from': 'home_await_result'},
+              ),
+            ),
+          ),
+          _Button(
             label: 'replace Native /native/c',
             onPressed: () => onRun(
               'replace native',
@@ -191,27 +198,6 @@ class HomePage extends StatelessWidget {
             onPressed: () => onRun(
               'replace flutter',
               () => EasyNative.replace('/flutter/profile'),
-            ),
-          ),
-          _Button(
-            label: 'pushAndRemoveUntil Flutter profile until /',
-            onPressed: () => onRun(
-              'pushAndRemoveUntil flutter',
-              () => EasyNative.pushAndRemoveUntil(
-                '/flutter/profile',
-                untilRoute: '/',
-              ),
-            ),
-          ),
-          _Button(
-            label: 'pushAndRemoveUntil Native c until /',
-            onPressed: () => onRun(
-              'pushAndRemoveUntil native',
-              () => EasyNative.pushAndRemoveUntil(
-                '/native/c',
-                arguments: {'from': 'home_remove_until'},
-                untilRoute: '/',
-              ),
             ),
           ),
           _Button(
@@ -262,8 +248,29 @@ class DemoFlutterPage extends StatelessWidget {
             onPressed: () => EasyNative.push('/native/a'),
           ),
           _Button(
+            label: 'pop with result',
+            onPressed: () => EasyNative.pop(
+              'result from Flutter $routeName',
+            ),
+          ),
+          _Button(
             label: 'replace Native /native/c',
             onPressed: () => EasyNative.replace('/native/c'),
+          ),
+          _Button(
+            label: 'pushAndRemoveUntil Flutter profile until /',
+            onPressed: () => EasyNative.pushAndRemoveUntil(
+              '/flutter/profile',
+              untilRoute: '/',
+            ),
+          ),
+          _Button(
+            label: 'pushAndRemoveUntil Native c until /',
+            onPressed: () => EasyNative.pushAndRemoveUntil(
+              '/native/c',
+              arguments: {'from': 'flutter_page_remove_until'},
+              untilRoute: '/',
+            ),
           ),
           _Button(label: 'pop', onPressed: () => EasyNative.pop()),
           _Button(

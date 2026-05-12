@@ -13,6 +13,7 @@ import io.flutter.plugin.common.MethodChannel.Result
 
 class EasyNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     companion object {
+        private var routerChannelRef: MethodChannel? = null
         private var eventChannel: MethodChannel? = null
         private var methodChannel: MethodChannel? = null
 
@@ -30,6 +31,22 @@ class EasyNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                 result,
             )
         }
+
+        fun completeRoute(
+            requestId: String,
+            resultValue: Any? = null,
+            action: String = "nativeRouteComplete",
+        ) {
+            routerChannelRef?.invokeMethod(
+                "completeRoute",
+                mapOf(
+                    "requestId" to requestId,
+                    "result" to resultValue,
+                    "success" to true,
+                    "action" to action,
+                ),
+            )
+        }
     }
 
     private lateinit var routerChannel: MethodChannel
@@ -38,6 +55,7 @@ class EasyNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         routerChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "easy_native/router")
         routerChannel.setMethodCallHandler(this)
+        routerChannelRef = routerChannel
 
         eventChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "easy_native/event_bus")
         eventChannel?.setMethodCallHandler(this)
@@ -58,12 +76,12 @@ class EasyNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             "replace" -> result.success(route(call, "replace"))
             "present" -> result.success(route(call, "present"))
             "pushAndRemoveUntil" -> result.success(route(call, "pushAndRemoveUntil"))
-            "pop" -> result.success(EasyNativeFlowManager.pop())
+            "pop" -> result.success(EasyNativeFlowManager.pop(call.argument<Any?>("result")))
             "popUntil" -> {
                 val routeName = call.argument<String>("routeName").orEmpty()
                 result.success(EasyNativeFlowManager.popUntil(routeName))
             }
-            "closeAll" -> result.success(EasyNativeFlowManager.closeAll())
+            "closeAll" -> result.success(EasyNativeFlowManager.closeAll(call.argument<Any?>("result")))
             "emitToNative" -> {
                 val type = call.argument<String>("type").orEmpty()
                 val data = call.argument<Any?>("data")
@@ -83,6 +101,7 @@ class EasyNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         routerChannel.setMethodCallHandler(null)
+        routerChannelRef = null
         eventChannel?.setMethodCallHandler(null)
         methodChannel?.setMethodCallHandler(null)
         eventChannel = null
@@ -110,6 +129,7 @@ class EasyNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun route(call: MethodCall, action: String): Map<String, Any?> {
         val routeName = call.argument<String>("routeName").orEmpty()
         val arguments = call.argument<Any?>("arguments")
+        val requestId = call.argument<String>("requestId")
         val context = currentContext()
             ?: return mapOf(
                 "success" to false,
@@ -118,20 +138,27 @@ class EasyNativePlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             )
 
         return when (action) {
-            "push" -> EasyNativeFlowManager.push(context, routeName, arguments)
+            "push" -> EasyNativeFlowManager.push(context, routeName, arguments, requestId)
             "replace" -> {
                 if (EasyNativeFlowManager.hasActiveNativeFlow()) {
-                    EasyNativeFlowManager.replace(context, routeName, arguments)
+                    EasyNativeFlowManager.replace(
+                        context,
+                        routeName,
+                        arguments,
+                        call.argument<Any?>("result"),
+                        requestId,
+                    )
                 } else {
-                    EasyNativeFlowManager.push(context, routeName, arguments)
+                    EasyNativeFlowManager.push(context, routeName, arguments, requestId)
                 }
             }
-            "present" -> EasyNativeFlowManager.present(context, routeName, arguments)
+            "present" -> EasyNativeFlowManager.present(context, routeName, arguments, requestId)
             "pushAndRemoveUntil" -> EasyNativeFlowManager.pushAndRemoveUntil(
                 context,
                 routeName,
                 arguments,
                 call.argument<String>("untilRoute"),
+                requestId,
             )
             else -> mapOf(
                 "success" to false,

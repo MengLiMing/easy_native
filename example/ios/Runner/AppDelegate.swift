@@ -54,11 +54,15 @@ final class NativeDemoViewController: UIViewController {
     super.viewDidLoad()
     view.backgroundColor = backgroundColor()
 
+    let scrollView = UIScrollView()
+    scrollView.translatesAutoresizingMaskIntoConstraints = false
+    view.addSubview(scrollView)
+
     let stack = UIStackView()
     stack.axis = .vertical
     stack.spacing = 12
     stack.translatesAutoresizingMaskIntoConstraints = false
-    view.addSubview(stack)
+    scrollView.addSubview(stack)
 
     let label = UILabel()
     label.numberOfLines = 0
@@ -93,14 +97,52 @@ final class NativeDemoViewController: UIViewController {
     addButton("pop", to: stack) {
       _ = EasyNative.shared.pop()
     }
+    addButton("pop with result", to: stack) {
+      _ = EasyNative.shared.pop(result: "iOS result from \(self.routeName)")
+    }
+    addButton("pop result int", to: stack) {
+      _ = EasyNative.shared.pop(result: 7)
+    }
+    addButton("pop result bool", to: stack) {
+      _ = EasyNative.shared.pop(result: true)
+    }
+    addButton("pop result list", to: stack) {
+      _ = EasyNative.shared.pop(result: ["ios", self.routeName, 1, true])
+    }
+    addButton("pop result map", to: stack) {
+      _ = EasyNative.shared.pop(result: [
+        "platform": "ios",
+        "route": self.routeName,
+        "nested": ["ok": true],
+        "items": [1, 2, 3]
+      ])
+    }
     addButton("close all native", to: stack) {
       _ = EasyNative.shared.closeAll()
     }
+    addButton("close all native with result", to: stack) {
+      _ = EasyNative.shared.closeAll(result: "iOS closeAll result from \(self.routeName)")
+    }
+    addButton("close all native with map result", to: stack) {
+      _ = EasyNative.shared.closeAll(result: [
+        "platform": "ios",
+        "route": self.routeName,
+        "action": "closeAll",
+        "items": ["a", 1, true]
+      ])
+    }
 
     NSLayoutConstraint.activate([
-      stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-      stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-      stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 24),
+      scrollView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor),
+      scrollView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor),
+      scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+      scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+      stack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 24),
+      stack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -24),
+      stack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 24),
+      stack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -24),
+      stack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -48)
     ])
   }
 

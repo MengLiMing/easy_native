@@ -1,5 +1,5 @@
 PODS:
-  - easy_native (0.0.1):
+  - easy_native (0.0.2):
     - Flutter
   - Flutter (1.0.0)
   - integration_test (0.0.1):
@@ -19,10 +19,10 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/integration_test/ios"
 
 SPEC CHECKSUMS:
-  easy_native: 90bb54a05e7f8a029afcd8b858437125c7a38b3b
+  easy_native: e4b68fdc43202342be18ffed4e4cf2e2bb442d5d
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
   integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: 251cb053df7158f337c0712f2ab29f4e0fa474ce
 
 COCOAPODS: 1.16.2

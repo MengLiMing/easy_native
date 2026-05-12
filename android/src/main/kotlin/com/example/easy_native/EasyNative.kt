@@ -82,20 +82,20 @@ object EasyNative {
     }
 
     fun push(context: Context, routeName: String, arguments: Any? = null): Map<String, Any?> {
-        return EasyNativeFlowManager.push(context, routeName, arguments)
+        return EasyNativeFlowManager.push(context, routeName, arguments, null)
     }
 
     fun replace(context: Context, routeName: String, arguments: Any? = null): Map<String, Any?> {
-        return EasyNativeFlowManager.replace(context, routeName, arguments)
+        return EasyNativeFlowManager.replace(context, routeName, arguments, null, null)
     }
 
     fun present(context: Context, routeName: String, arguments: Any? = null): Map<String, Any?> {
-        return EasyNativeFlowManager.present(context, routeName, arguments)
+        return EasyNativeFlowManager.present(context, routeName, arguments, null)
     }
 
-    fun pop(): Map<String, Any?> = EasyNativeFlowManager.pop()
+    fun pop(result: Any? = null): Map<String, Any?> = EasyNativeFlowManager.pop(result)
 
     fun popUntil(routeName: String): Map<String, Any?> = EasyNativeFlowManager.popUntil(routeName)
 
-    fun closeAll(): Map<String, Any?> = EasyNativeFlowManager.closeAll()
+    fun closeAll(result: Any? = null): Map<String, Any?> = EasyNativeFlowManager.closeAll(result)
 }

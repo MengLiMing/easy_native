@@ -1,6 +1,6 @@
 name: easy_native
 description: "A powerful Flutter plugin for seamless native routing management and bidirectional communication between Flutter and iOS/Android."
-version: 0.0.1
+version: 0.0.2
 homepage: https://github.com/MengLiMing/easy_native
 repository: https://github.com/MengLiMing/easy_native
 environment:
@@ -11,7 +11,6 @@ dependencies:
   flutter:
     sdk: flutter
   plugin_platform_interface: ^2.0.2
-  result_dart: ^2.2.0
   rxdart: ^0.28.0
 
 dev_dependencies:

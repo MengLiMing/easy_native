@@ -37,6 +37,24 @@ public final class EasyNativeRouteRegistry {
 
 private var easyNativeRouteNameKey: UInt8 = 0
 private var easyNativeArgumentsKey: UInt8 = 0
+private var easyNativeRequestIdKey: UInt8 = 0
+private var easyNativeCompletionTokenKey: UInt8 = 0
+
+public final class EasyNativeRouteCompletionToken {
+    private let requestId: String
+
+    public init(requestId: String) {
+        self.requestId = requestId
+    }
+
+    deinit {
+        EasyNativeFlowManager.shared.completeRoute(
+            requestId: requestId,
+            result: nil,
+            action: "nativeDeinit"
+        )
+    }
+}
 
 extension UIViewController {
     public var easyNativeRouteName: String? {
@@ -61,6 +79,37 @@ extension UIViewController {
             objc_setAssociatedObject(
                 self,
                 &easyNativeArgumentsKey,
+                newValue,
+                .OBJC_ASSOCIATION_RETAIN_NONATOMIC
+            )
+        }
+    }
+
+    public var easyNativeRequestId: String? {
+        get {
+            return objc_getAssociatedObject(self, &easyNativeRequestIdKey) as? String
+        }
+        set {
+            objc_setAssociatedObject(
+                self,
+                &easyNativeRequestIdKey,
+                newValue,
+                .OBJC_ASSOCIATION_COPY_NONATOMIC
+            )
+        }
+    }
+
+    public var easyNativeCompletionToken: EasyNativeRouteCompletionToken? {
+        get {
+            return objc_getAssociatedObject(
+                self,
+                &easyNativeCompletionTokenKey
+            ) as? EasyNativeRouteCompletionToken
+        }
+        set {
+            objc_setAssociatedObject(
+                self,
+                &easyNativeCompletionTokenKey,
                 newValue,
                 .OBJC_ASSOCIATION_RETAIN_NONATOMIC
             )

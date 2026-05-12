@@ -1,9 +1,4 @@
-import 'dart:async';
-
-import 'package:flutter/services.dart';
-import 'package:rxdart/rxdart.dart';
-
-import '../router/easy_native.dart';
+part of easy_native;
 
 typedef EasyNativeMethodHandler = FutureOr<Object?> Function(Object? data);
 
@@ -21,9 +16,9 @@ class EasyNativeEvent {
   }
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'type': type,
-    'data': data,
-  };
+        'type': type,
+        'data': data,
+      };
 }
 
 class EasyNativeEventBus {
@@ -64,7 +59,10 @@ class EasyNativeEventBus {
     );
     await _eventChannel.invokeMethod<void>(
       'emitToNative',
-      EasyNativeEvent(type: type, data: data).toJson(),
+      EasyNativeEvent(
+        type: type,
+        data: _normalizeMessageValue(data),
+      ).toJson(),
     );
   }
 }
@@ -89,12 +87,20 @@ class EasyNativeMessenger {
         throw MissingPluginException('Unknown method ${call.method}');
       }
       final args = call.arguments as Map<dynamic, dynamic>? ?? const {};
-      final name = args['method'] as String?;
-      final handler = name == null ? null : _flutterHandlers[name];
+      final rawName = args['method'] as String?;
+      final name = rawName?.trim();
+
+      if (name == null || name.isEmpty) {
+        throw MissingPluginException(
+            'Flutter method is not registered: $rawName');
+      }
+
+      final handler = _flutterHandlers[name];
       if (handler == null) {
         throw MissingPluginException('Flutter method is not registered: $name');
       }
-      return handler(args['data']);
+      final result = await handler(args['data']);
+      return _normalizeMessageValue(result);
     });
   }
 
@@ -102,25 +108,74 @@ class EasyNativeMessenger {
     String method,
     EasyNativeMethodHandler handler,
   ) {
-    if (method.trim().isEmpty) {
+    final methodName = method.trim();
+    if (methodName.isEmpty) {
       throw ArgumentError.value(method, 'method', 'method cannot be empty');
     }
-    _flutterHandlers[method] = handler;
+    _flutterHandlers[methodName] = handler;
   }
 
   static void unregisterFlutterMethod(String method) {
-    _flutterHandlers.remove(method);
+    _flutterHandlers.remove(method.trim());
   }
 
   static Future<T?> invokeNative<T>(String method, {Object? data}) async {
+    final methodName = method.trim();
+    if (methodName.isEmpty) {
+      throw ArgumentError.value(method, 'method', 'method cannot be empty');
+    }
+
     EasyNativeLogger.log(
       EasyNativeLogLevel.debug,
-      'invoke native method=$method',
+      'invoke native method=$methodName',
     );
+    final formattedData = _normalizeMessageValue(data);
+
     final result = await _methodChannel.invokeMethod<T>(
       'invokeNative',
-      <String, Object?>{'method': method, 'data': data},
+      <String, Object?>{
+        'method': methodName,
+        'data': formattedData,
+      },
     );
     return result;
   }
+}
+
+Object? _normalizeMessageValue(Object? value) {
+  if (value == null || value is num || value is String || value is bool) {
+    return value;
+  }
+
+  if (value is EasyNativeSerializable) {
+    final json = value.toJson();
+    try {
+      jsonEncode(json);
+      return json;
+    } catch (error) {
+      throw PlatformException(
+        code: 'invalid_message_value',
+        message:
+            'EasyNativeSerializable.toJson() must return a JSON serializable map: $error',
+      );
+    }
+  }
+
+  if (value is Map || value is List) {
+    try {
+      jsonEncode(value);
+      return value;
+    } catch (error) {
+      throw PlatformException(
+        code: 'invalid_message_value',
+        message: 'Messenger value must be JSON serializable: $error',
+      );
+    }
+  }
+
+  throw PlatformException(
+    code: 'invalid_message_value',
+    message:
+        'Messenger value must be JSON serializable. Current type: ${value.runtimeType}',
+  );
 }
